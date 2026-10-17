@@ -11,7 +11,8 @@ local CFG <const> = {
         ["vector2"] = true,
         ["vector3"] = true,
         ["vector4"] = true,
-        ["quat"] = true
+        ["quat"] = true,
+        ["function"] = true
     },
     maxLineLength = 1000
 }
@@ -25,7 +26,7 @@ local CFG <const> = {
 --- debug - Print any data in a readable format (raises on error, use debugPrint instead)
 --- @param data any data to print
 --- @param opts? options
-local function debug(data, opts)
+local function _debug(data, opts)
     assert(json, "json not available")
     assert(opts == nil or type(opts) == "table", "opts must be a table")
 
@@ -50,6 +51,15 @@ local function debug(data, opts)
 
         if t ~= "table" then
             return "<" .. t .. ">"
+        end
+
+        if t == CFG.availableTypes["number"] and (v ~= v or v == math.huge or v == -math.huge) then
+            return v ~= v and "<nan>" or (v > 0 and "<inf>" or "<-inf>")
+        end
+
+        if t == CFG.availableTypes["function"] then
+            local info = debug.getinfo(v, "S")
+            return info and ("<function: " .. info.short_src .. ":" .. info.linedefined .. ">") or "<function>"
         end
 
         if seen[v] then
@@ -136,7 +146,7 @@ end
 --- @param data any data to print
 --- @param opts? options
 _G.debugPrint = function(data, opts)
-    local ok, err = pcall(debug, data, opts)
+    local ok, err = pcall(_debug, data, opts)
     if not ok then
         print("[debugPrint] " .. tostring(err))
     end
