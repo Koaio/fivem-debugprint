@@ -3,25 +3,43 @@
 --- @license   Custom (based on MIT) - see LICENSE file
 --- @repo      https://github.com/Koaio/fivem-debugprint
 
---- debugPrint - Print any data in a readable format
+local CFG <const> = {
+    availableTypes = {
+        ["string"] = true,
+        ["number"] = true,
+        ["boolean"] = true,
+        ["vector2"] = true,
+        ["vector3"] = true,
+        ["vector4"] = true,
+        ["quat"] = true
+    },
+    maxLineLength = 1000
+}
+
+--- @class options
+--- @field public indent? boolean
+--- @field public maxDepth? number
+--- @field public tag? string
+--- @field public showMeta? boolean
+
+--- debug - Print any data in a readable format (raises on error, use debugPrint instead)
 --- @param data any data to print
---- @param opts? table { indent?: boolean, maxDepth?: number, tag?: string }
-local function debugPrint(data, opts)
+--- @param opts? options
+local function debug(data, opts)
+    assert(json, "json not available")
+    assert(opts == nil or type(opts) == "table", "opts must be a table")
+
     opts = opts or {}
     local indent   = opts.indent ~= false
-    local maxDepth = opts.maxDepth or 32
-    local tag      = opts.tag and ("[" .. opts.tag .. "] ") or ""
-
-    if not json or not json.encode then
-        print(tag .. "[debugPrint] json.encode unavailable")
-        return
-    end
+    local maxDepth = type(opts.maxDepth) == "number" and opts.maxDepth or 32
+    local tag      = opts.tag and ("[" .. tostring(opts.tag) .. "] ") or ""
+    local showMeta = opts.showMeta == true
 
     local seen, refId = {}, 0
     local function convert(v, depth)
         local t = type(v)
 
-        if t == "string" or t == "number" or t == "boolean" then
+        if CFG.availableTypes[t] then
             return v
         end
 
@@ -42,13 +60,12 @@ local function debugPrint(data, opts)
         end
 
         local mt = getmetatable(v)
-        if mt then
-            if mt.__name and not (mt.__pairs or mt.__index) then
-                return "<" .. mt.__name .. ">"
-            end
-            if mt.__index and not mt.__pairs then
-                return "<proxy:" .. (mt.__name or "table") .. ">"
-            end
+        if type(mt) ~= "table" then
+            mt = nil
+        end
+
+        if mt and type(mt.__index) == "function" and next(v) == nil then
+            return "<proxy:" .. (mt.__name or "table") .. ">"
         end
 
         refId = refId + 1
@@ -56,20 +73,34 @@ local function debugPrint(data, opts)
 
         local out = {}
         local okIter = pcall(function()
+            local entries, count, maxKey, isArray = {}, 0, 0, true
+
             for k, val in pairs(v) do
-                local kt = type(k)
-                local key
-                if kt == "string" then
-                    key = k
-                elseif kt == "number" or kt == "boolean" then
-                    key = tostring(k)
+                count = count + 1
+                entries[count] = { k, val }
+
+                if math.type(k) == "integer" and k >= 1 then
+                    maxKey = math.max(maxKey, k)
                 else
-                    local ok, s = pcall(tostring, k)
-                    key = ok and s or ("<key:" .. kt .. ">")
+                    isArray = false
                 end
-                out[key] = convert(val, depth + 1)
+            end
+
+            local meta = showMeta and mt and type(mt.__index) == "table" and mt.__index or nil
+            isArray = isArray and maxKey == count and not meta
+
+            for i = 1, count do
+                local k, val = entries[i][1], entries[i][2]
+                out[isArray and k or tostring(k)] = convert(val, depth + 1)
+            end
+
+            if meta then
+                out["<meta>"] = convert(meta, depth + 1)
             end
         end)
+
+        seen[v] = nil
+
         if not okIter then
             return "<uniterable:" .. (mt and mt.__name or "table") .. ">"
         end
@@ -77,21 +108,18 @@ local function debugPrint(data, opts)
     end
 
     local okConv, safe = pcall(convert, data, 0)
-    if not okConv then
-        print(tag .. "[debugPrint] convert error: " .. tostring(safe))
-        return
-    end
+    assert(okConv, string.format("convert error: %s", tostring(safe)))
 
     local okEnc, encoded = pcall(json.encode, safe, { indent = indent })
-    if not okEnc then
-        print(tag .. "[debugPrint] encode error: " .. tostring(encoded))
-        return
-    end
+    assert(okEnc, string.format("encode error: %s", tostring(encoded)))
 
-    if #encoded > 1000 then
+    if #encoded > CFG.maxLineLength then
         local lineStart = 1
         for i = 1, #encoded do
-            if encoded:byte(i) == 10 or (i - lineStart >= 1000) then
+            if encoded:byte(i) == 10 then
+                print(tag .. encoded:sub(lineStart, i - 1))
+                lineStart = i + 1
+            elseif i - lineStart + 1 >= CFG.maxLineLength then
                 print(tag .. encoded:sub(lineStart, i))
                 lineStart = i + 1
             end
@@ -104,4 +132,12 @@ local function debugPrint(data, opts)
     end
 end
 
-_G.debugPrint = debugPrint
+--- debugPrint - Print any data in a readable format, never raises
+--- @param data any data to print
+--- @param opts? options
+_G.debugPrint = function(data, opts)
+    local ok, err = pcall(debug, data, opts)
+    if not ok then
+        print("[debugPrint] " .. tostring(err))
+    end
+end

@@ -6,3 +6,4 @@ description 'Print any Lua data in a readable JSON format (cycles, userdata, pro
 version '1.0.0'
 
 shared_script 'debugPrint.lua'
+shared_script 'tests/tests.lua'
